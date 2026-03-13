@@ -57,8 +57,40 @@ Key Functionalities
 
        Packets/Time -  the duration of the connection
    3.3 Logisitic regression classification- This shallow learning model classifies network log records based on thier
-   attributes relative association with known malicous connections [here](https://en.wikipedia.org/wiki/Logistic_regression)
+   attributes relative association with known malicous connections.In depth expplanations and supplemental material can be found [here](https://en.wikipedia.org/wiki/Logistic_regression).
 
+
+🛠️ Tech Stack
+Frontend
+
+   	Styling: Tailwind CSS v4.2.1
+  
+   	Languages: HTML5, CSS3, JavaScript (ES2025)
+
+Backend
+  	Framework: FastAPI
+
+  	Database Toolkit: SQLAlchemy 2.0.48
+
+  	Language: Python 3.14.x
+
+AI & Data Science
+ 	Deep Learning: PyTorch (Logistic Regression Model)
+
+  	Data Manipulation: Pandas
+
+  	Machine Learning: Scikit-learn
+
+  	Visualization: Matplotlib
+
+  	Data Source: Kaggle (DDoS Network Traffic Dataset)
+
+Infrastructure & Hosting
+  	Cloud Provider: Amazon Web Services (AWS)
+
+  	Compute: Amazon EC2 (t2.micro/t3.small instance)
+
+  	Deployment: Hosted via FastAPI on a Linux-based EC2 environment.
 
    
   
