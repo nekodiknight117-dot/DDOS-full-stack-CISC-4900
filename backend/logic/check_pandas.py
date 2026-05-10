@@ -1,4 +1,6 @@
 import ipaddress
+import json
+import pickle
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -96,25 +98,41 @@ def dataframe_to_numeric_tensor(features: pd.DataFrame) -> torch.Tensor:
 
 
 def tensor_for_model_evaluation(
-    features: torch.Tensor, apply_dropout_noise: bool = False
+    features: torch.Tensor,
+    apply_dropout_noise: bool = False,
+    scaler_path: Optional[Path] = None,
 ) -> torch.Tensor:
     """
-    Standardize features to zero mean / unit variance (same idea as training)
-    and return a float32 tensor ready for the model.
-
-    Training used fit on train split; at inference we fit on the uploaded batch
-    unless you persist a scaler from training.
+    Standardize features using the scaler saved during training.
+    If scaler_path is provided and the file exists, load that scaler and call
+    transform-only (consistent with training statistics).  Falls back to
+    fit_transform on the uploaded batch when no saved scaler is available.
     """
     if features.numel() == 0:
         raise ValueError("Empty feature tensor; nothing to evaluate.")
-    scaler = StandardScaler()
-    scaled = scaler.fit_transform(features.detach().cpu().numpy())
+    arr = features.detach().cpu().numpy()
+    if scaler_path is not None and scaler_path.is_file():
+        with open(scaler_path, "rb") as f:
+            scaler: StandardScaler = pickle.load(f)
+        scaled = scaler.transform(arr)
+    else:
+        scaler = StandardScaler()
+        scaled = scaler.fit_transform(arr)
     tensor = torch.from_numpy(scaled.astype(np.float32))
     if apply_dropout_noise:
-        import Data_cleaner as dc
+        from logic import Data_cleaner as dc
 
         tensor = dc.csv_Tensor.noisemaker(tensor)
     return tensor
+
+
+def load_training_feature_columns(weights_path: Path) -> Optional[List[str]]:
+    """Return the column list saved during training, or None if the file is missing."""
+    features_path = Path(weights_path).with_name("ddos_features.json")
+    if not features_path.is_file():
+        return None
+    with open(features_path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def load_model_for_input_dim(weights_path: Path, input_dim: int) -> DdosModel:
@@ -149,11 +167,25 @@ def infer_malware_from_dataframe(
 ) -> Dict[str, Any]:
     """
     End-to-end: preprocess -> column selection -> tensor -> scale -> model -> labels.
+
+    Column priority (highest to lowest):
+      1. Caller-supplied feature_columns
+      2. ddos_features.json saved during training  (exact columns, exact order)
+      3. Auto-detect: every column except DEFAULT_DROP
     """
+    scaler_path = Path(weights_path).with_name("ddos_scaler.pkl")
+
+    # Resolve which columns to use before touching the data
+    resolved_columns: Optional[Sequence[str]] = feature_columns
+    if resolved_columns is None:
+        resolved_columns = load_training_feature_columns(weights_path)
+
     processed = preprocess_network_df(df)
-    feature_df, used_columns = select_feature_columns(processed, feature_columns)
+    feature_df, used_columns = select_feature_columns(processed, resolved_columns)
     raw_tensor = dataframe_to_numeric_tensor(feature_df)
-    model_tensor = tensor_for_model_evaluation(raw_tensor, apply_dropout_noise=False)
+    model_tensor = tensor_for_model_evaluation(
+        raw_tensor, apply_dropout_noise=False, scaler_path=scaler_path
+    )
     model = load_model_for_input_dim(weights_path, model_tensor.shape[1])
     probs = evaluate_model_on_tensor(model, model_tensor).squeeze(-1)
     prob_list = probs.detach().cpu().tolist()
@@ -170,7 +202,8 @@ def infer_malware_from_dataframe(
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    import Data_cleaner as dc
+
+    from logic import Data_cleaner as dc
 
     file = pd.read_csv(r"C:\Users\1dayk\Downloads\archive\DDoS_dataset.csv")
     print(file.isnull().sum())
@@ -186,6 +219,7 @@ if __name__ == "__main__":
     y = torch.tensor(file["target"].values, dtype=torch.float32)
 
     file = file.drop(columns=["target", "Dest IP", "Source IP", "Dest Port", "Source Port"])
+    training_feature_columns: List[str] = list(file.columns)
     x = torch.tensor(file.values, dtype=torch.float32)
 
     x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42)
@@ -261,3 +295,13 @@ if __name__ == "__main__":
     out_path = Path(__file__).resolve().parent / "ddos_model.pth"
     torch.save(model.state_dict(), out_path)
     print(f"Model successfully saved to {out_path}")
+
+    scaler_out_path = out_path.with_name("ddos_scaler.pkl")
+    with open(scaler_out_path, "wb") as f:
+        pickle.dump(scaler, f)
+    print(f"Scaler successfully saved to {scaler_out_path}")
+
+    features_out_path = out_path.with_name("ddos_features.json")
+    with open(features_out_path, "w", encoding="utf-8") as f:
+        json.dump(training_feature_columns, f)
+    print(f"Feature columns saved to {features_out_path}: {training_feature_columns}")

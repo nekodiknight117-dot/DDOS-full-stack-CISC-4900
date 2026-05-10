@@ -35,15 +35,16 @@ class csv_Tensor:
             dataframe[vals] = dataframe[vals].astype('Float32').astype('category').cat.codes
         return torch.tensor(dataframe.values,dtype=torch.float32)
 
-data = pd.read_csv(r'C:\Users\1dayk\Downloads\archive\DDoS_dataset.csv')
-zeros= 0
-ones=0
-for vals in data.iloc[:, 8]:
-    if (vals == 0):
-        zeros += 1
-    else:
-        ones += 1
-print(zeros)
-print(ones)
+if __name__ == "__main__":
+    data = pd.read_csv(r'C:\Users\1dayk\Downloads\archive\DDoS_dataset.csv')
+    zeros = 0
+    ones = 0
+    for vals in data.iloc[:, 8]:
+        if (vals == 0):
+            zeros += 1
+        else:
+            ones += 1
+    print(zeros)
+    print(ones)
         
         
