@@ -10,7 +10,9 @@ __pycache__/
 backend/ddos_model.pth
 backend/ddos_scaler.pkl
 backend/ddos_features.json
-
+debug-3c5f41.log
+debug-3c5f41.log
+backend\app\api\routes\__pycache__
 # Debug logs
 *.log
 

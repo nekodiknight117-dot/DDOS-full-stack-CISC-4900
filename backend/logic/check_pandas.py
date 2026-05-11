@@ -3,7 +3,7 @@ import json
 import pickle
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
-
+import pandas as pd
 import numpy as np
 import pandas as pd
 import torch
@@ -189,7 +189,7 @@ def infer_malware_from_dataframe(
     model = load_model_for_input_dim(weights_path, model_tensor.shape[1])
     probs = evaluate_model_on_tensor(model, model_tensor).squeeze(-1)
     prob_list = probs.detach().cpu().tolist()
-    labels = ["Malware" if p > threshold else "Not Malware" for p in prob_list]
+    labels = ["Malware" if p >= threshold else "Not Malware" for p in prob_list]
     return {
         "feature_columns_used": used_columns,
         "rows": len(labels),
@@ -305,3 +305,5 @@ if __name__ == "__main__":
     with open(features_out_path, "w", encoding="utf-8") as f:
         json.dump(training_feature_columns, f)
     print(f"Feature columns saved to {features_out_path}: {training_feature_columns}")
+
+
