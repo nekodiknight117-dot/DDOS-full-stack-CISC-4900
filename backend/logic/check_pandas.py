@@ -53,7 +53,7 @@ DEFAULT_DROP = {"target", "Dest IP", "Source IP", "Dest Port", "Source Port"}
 
 
 def preprocess_network_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Apply the same encodings used during training when those columns exist."""
+    
     out = df.copy()
     if "Dest IP" in out.columns:
         out["Dest IP"] = out["Dest IP"].apply(ip_to_int).astype("int64")
@@ -67,10 +67,7 @@ def preprocess_network_df(df: pd.DataFrame) -> pd.DataFrame:
 def select_feature_columns(
     df: pd.DataFrame, feature_columns: Optional[Sequence[str]] = None
 ) -> Tuple[pd.DataFrame, List[str]]:
-    """
-    If feature_columns is set, use exactly those columns (in order).
-    Otherwise use all columns except the usual label / IP / port fields.
-    """
+   
     if feature_columns:
         cols = [c.strip() for c in feature_columns if str(c).strip()]
         missing = set(cols) - set(df.columns)
@@ -89,7 +86,7 @@ def select_feature_columns(
 
 
 def dataframe_to_numeric_tensor(features: pd.DataFrame) -> torch.Tensor:
-    """Coerce every column to float32 and return shape (n_rows, n_features)."""
+  
     numeric = features.copy()
     for c in numeric.columns:
         numeric[c] = pd.to_numeric(numeric[c], errors="coerce").fillna(0.0)
@@ -102,12 +99,7 @@ def tensor_for_model_evaluation(
     apply_dropout_noise: bool = False,
     scaler_path: Optional[Path] = None,
 ) -> torch.Tensor:
-    """
-    Standardize features using the scaler saved during training.
-    If scaler_path is provided and the file exists, load that scaler and call
-    transform-only (consistent with training statistics).  Falls back to
-    fit_transform on the uploaded batch when no saved scaler is available.
-    """
+  
     if features.numel() == 0:
         raise ValueError("Empty feature tensor; nothing to evaluate.")
     arr = features.detach().cpu().numpy()
@@ -127,7 +119,7 @@ def tensor_for_model_evaluation(
 
 
 def load_training_feature_columns(weights_path: Path) -> Optional[List[str]]:
-    """Return the column list saved during training, or None if the file is missing."""
+    
     features_path = Path(weights_path).with_name("ddos_features.json")
     if not features_path.is_file():
         return None
@@ -154,7 +146,7 @@ def load_model_for_input_dim(weights_path: Path, input_dim: int) -> DdosModel:
 
 
 def evaluate_model_on_tensor(model: DdosModel, x: torch.Tensor) -> torch.Tensor:
-    """Return sigmoid probabilities, shape (n_rows, 1)."""
+   
     with torch.no_grad():
         return model(x)
 
@@ -165,14 +157,7 @@ def infer_malware_from_dataframe(
     feature_columns: Optional[Sequence[str]] = None,
     threshold: float = 0.5,
 ) -> Dict[str, Any]:
-    """
-    End-to-end: preprocess -> column selection -> tensor -> scale -> model -> labels.
-
-    Column priority (highest to lowest):
-      1. Caller-supplied feature_columns
-      2. ddos_features.json saved during training  (exact columns, exact order)
-      3. Auto-detect: every column except DEFAULT_DROP
-    """
+    
     scaler_path = Path(weights_path).with_name("ddos_scaler.pkl")
 
     # Resolve which columns to use before touching the data

@@ -1,12 +1,11 @@
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
-    """Declarative base for ORM models."""
-
     pass
 
 
@@ -57,6 +56,11 @@ class Analysis(Base):
     analysis_results: Mapped[list["AnalysisResult"]] = relationship(
         "AnalysisResult", back_populates="analysis"
     )
+    csv_sample_rows: Mapped[list["CsvSampleRow"]] = relationship(
+        "CsvSampleRow",
+        back_populates="analysis",
+        order_by="CsvSampleRow.row_index",
+    )
 
 
 class AnalysisResult(Base):
@@ -74,3 +78,19 @@ class AnalysisResult(Base):
     analysis_classification: Mapped[bool] = mapped_column(
         "analysisclassification", Boolean, nullable=False
     )
+
+
+class CsvSampleRow(Base):
+    __tablename__ = "csv_sample_rows"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    analysis_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("analyses.id"), nullable=False, index=True
+    )
+    analysis: Mapped["Analysis"] = relationship(
+        "Analysis", back_populates="csv_sample_rows"
+    )
+    row_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    row_data: Mapped[str] = mapped_column(Text, nullable=False)
+    full_csv: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())

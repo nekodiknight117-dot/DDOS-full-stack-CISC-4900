@@ -1,5 +1,3 @@
-"""CSV upload and malware inference endpoint."""
-
 import io
 import json
 from typing import Any, Dict, List, Optional, Tuple
@@ -10,7 +8,9 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 import logic.check_pandas as ai_model
 from app.core.config import MODEL_PATH
 from database.session import SessionLocal
-from database.tables import Analysis, AnalysisResult, Log, User
+from database.tables import Analysis, AnalysisResult, CsvSampleRow, Log, User
+
+CSV_SAMPLE_SIZE = 10
 
 router = APIRouter(tags=["upload"])
 
@@ -38,12 +38,10 @@ def _require_csv_columns(df: pd.DataFrame) -> pd.DataFrame:
                 f"{list(CSV_FEATURE_COLUMNS)}. Missing: {missing}"
             ),
         )
-    # Drop everything else so inference only sees required features.
     return df[list(CSV_FEATURE_COLUMNS)].copy()
 
 
 def _per_record_results(inference: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """One entry per CSV row in order (matches `infer_malware_from_dataframe` output)."""
     probs = inference["probabilities"]
     labels = inference["labels"]
     return [
@@ -53,10 +51,6 @@ def _per_record_results(inference: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _get_or_create_system_user() -> User:
-    """
-    Uploads currently aren't authenticated, but `logs.user_id` is non-nullable.
-    We create/reuse a single 'system' user to satisfy the FK.
-    """
     with SessionLocal() as db:
         user = db.query(User).filter(User.username == "system").one_or_none()
         if user is not None:
@@ -68,13 +62,46 @@ def _get_or_create_system_user() -> User:
         return user
 
 
+def _persist_csv_sample(
+    analysis_id: int,
+    df: pd.DataFrame,
+    full_csv_text: Optional[str] = None,
+    n: int = CSV_SAMPLE_SIZE,
+) -> None:
+    head = df.head(n)
+    rows: List[Dict[str, Any]] = json.loads(head.to_json(orient="records"))
+    if not rows and full_csv_text is None:
+        return
+    with SessionLocal() as db:
+        if not rows:
+            db.add(
+                CsvSampleRow(
+                    analysis_id=analysis_id,
+                    row_index=0,
+                    row_data=json.dumps({}),
+                    full_csv=full_csv_text,
+                )
+            )
+        else:
+            for idx, row in enumerate(rows):
+                db.add(
+                    CsvSampleRow(
+                        analysis_id=analysis_id,
+                        row_index=idx,
+                        row_data=json.dumps(row),
+                        full_csv=full_csv_text if idx == 0 else None,
+                    )
+                )
+        db.commit()
+
+
 def _persist_upload_result(
     *,
     user_id: int,
     filename: str,
     feature_columns: List[str],
     inference: Dict[str, Any],
-) -> None:
+) -> int:
     malware_rows = [
         r["row_index"] for r in _per_record_results(inference) if r["label"] == "Malware"
     ]
@@ -95,14 +122,14 @@ def _persist_upload_result(
             ),
         )
         db.add(log)
-        db.flush()  # populate log.id
+        db.flush()
 
         analysis = Analysis(
             log_id=log.id,
             analysis_data=json.dumps(inference),
         )
         db.add(analysis)
-        db.flush()  # populate analysis.id
+        db.flush()
 
         db.add(
             AnalysisResult(
@@ -113,6 +140,7 @@ def _persist_upload_result(
             )
         )
         db.commit()
+        return analysis.id
 
 
 @router.post("/upload-csv")
@@ -144,11 +172,6 @@ async def handle_upload(
         )
     raw_df = pd.read_csv(io.BytesIO(content))
 
-    # IMPORTANT:
-    # If you force only 4 columns but the model was trained on more features,
-    # predictions will often collapse to low probabilities (everything "Not Malware").
-    # So by default we let the model pick its expected columns (auto-detect / saved list).
-    # If you want 4-column mode, pass feature_columns explicitly.
     cols = _parse_feature_columns(feature_columns)
 
     try:
@@ -160,12 +183,14 @@ async def handle_upload(
         )
         records = _per_record_results(inference)
         system_user = _get_or_create_system_user()
-        _persist_upload_result(
+        analysis_id = _persist_upload_result(
             user_id=system_user.id,
             filename=file.filename,
             feature_columns=list(inference.get("feature_columns_used", cols or [])),
             inference=inference,
         )
+        full_csv_text = content.decode("utf-8-sig", errors="replace")
+        _persist_csv_sample(analysis_id, raw_df, full_csv_text=full_csv_text)
     except FileNotFoundError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     except ValueError as e:
@@ -173,6 +198,7 @@ async def handle_upload(
 
     preview = raw_df.head().to_dict(orient="list")
     return {
+        "analysis_id": analysis_id,
         "filename": file.filename,
         "rows": len(raw_df),
         "preview": preview,
